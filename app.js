@@ -3,6 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const encrypt = require('mongoose-encryption');
+const bcrypt = require('bcrypt');
+
+const saltRounds = 12;
 const app = express();
 const key = process.env.ENC_KEY;
 
@@ -13,7 +16,7 @@ const userSchema = new mongoose.Schema({
   email: String,
   password: String
 });
-userSchema.plugin(encrypt, {secret: key, encryptedField: ['email', 'password'] });
+userSchema.plugin(encrypt, {secret: key, encryptedFields: ['password'] });
 const myColl = new mongoose.model('user', userSchema);
 
 app.get('/', async function(req, res) {
@@ -27,19 +30,21 @@ app.route('/login')
 .post(async function(req, res) {
   const username = req.body.username;
   const password = req.body.password;
+  const objToFind = {email: username};
   await mongoose.connect('mongodb://localhost:27017/securityPractice');
-  const findResult = await myColl.find({email: username});
+  const findResult = await myColl.findOne(objToFind);
   await mongoose.connection.close();
-  console.log(findResult);
-  if(findResult.length > 0) {
-    console.log(findResult[0].password);
-    if(password == findResult[0].password) {
+  if(findResult.email == username) {
+    const compareResult = await bcrypt.compare(password, findResult.password);
+    if(compareResult) {
       res.render('secrets');
     } else {
       res.render('login');
+      console.log('username exist, wrong password');
     }
   } else {
     res.render('login');
+    console.log('wrong username');
   }
 });
 
@@ -49,15 +54,17 @@ app.route('/register')
 })
 .post(async function(req, res) {
   const email = req.body.username;
-  const password = req.body.password;
-  await mongoose.connect('mongodb://localhost:27017/securityPractice');
-  const createResult = await myColl.create({
-    email: email,
-    password: password
-  });
-  await mongoose.connection.close();
-  console.log(createResult);
-  res.render('secrets');
+  try {
+    const hash = await bcrypt.hash(req.body.password, saltRounds);
+    const objToSend = {email: email, password: hash};
+    console.log('objToSend: ', objToSend);
+    await mongoose.connect('mongodb://localhost:27017/securityPractice');
+    const createResult = await myColl.create(objToSend);
+    await mongoose.connection.close();
+    console.log(createResult);
+    res.render('secrets');
+  }
+  catch(err) { console.log(err); }
 });
 
 app.listen(3000, function() {
